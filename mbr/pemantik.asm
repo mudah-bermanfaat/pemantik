@@ -30,7 +30,7 @@
 	; program ini mulai dari alamat 0x7c00.
 	; *==================================/
 
-	; Beritahu pengkompilasi bahwa seluruh alamat memori absolut yang ditunjuk perlu ditambah 0x7c00
+	; Beritahu pengkompilasi bahwa seluruh alamat variabel dan program yang ditunjuk perlu ditambah 0x7c00
     [org 0x7c00]
 
 	; /==================================*
@@ -112,3 +112,17 @@
 	; Salin program
 	MOVSW
 
+	; /==================================*
+	; [ AGENDA 2 ]
+	; Memindahkan penunjuk alamat program saat ini ke alamat baru
+	;
+	; *==================================/
+
+	; Alamat absolut tujuan lompatan. Tujuan lompatnya adalah alamat saat ini yang sedang 
+	; dieksekusi (simbol $) dikurangi 0x7c00 (alamat memori lama) kemudian ditambah dengan 0x500
+	; (alamat memori baru) dan ditambah 1. Tujuannya adalah agar instruksi program 
+	; tetap dilanjutkan meskipun lokasi berbeda
+	target_salinan_program equ $ - 0x7c00 + 0x500 + 1
+
+	; Lompat menuju program baru
+	jmp 0x0000:target_salinan_program
