@@ -9,7 +9,7 @@
 	; 1. Menyalin program ke alamat memori 0x500
 	; 2. Memindahkan penunjuk alamat program saat ini ke alamat baru
 	; 3. Memuat data pada LBA 34 dan 35 yang berisi program selanjutnya
-	; 4. Memindahkan penunjuk alamat program saat ini ke program selanjutan
+	; 4. Lompat ke alamat program selanjutnya
 
     ; Hasil kompilasi dari program ini harus berukuran 512 byte, mengikuti format dari MBR
     ; Referensi: https://wiki.osdev.org/MBR_(x86)#MBR_Bootstrap
@@ -32,6 +32,12 @@
 
 	; Beritahu pengkompilasi bahwa seluruh alamat variabel dan program yang ditunjuk perlu ditambah 0x7c00
     [org 0x7c00]
+
+	; Atur titik paling bawah stack dan penunjuk stack saat ini di alamat memori 0xFFFF 
+	; (alamat 16-bit terkahir yang dapat dijangkau dan boleh dipakai)
+	; Referensi: https://wiki.osdev.org/Memory_Map_(x86)
+	mov bp, 0xffff
+	mov sp, bp
 
 	; /==================================*
 	; [ AGENDA 1 ]
@@ -126,3 +132,104 @@
 
 	; Lompat menuju program baru
 	jmp 0x0000:target_salinan_program
+
+	; /==================================*
+	; [ AGENDA 3 ]
+	; Memuat data pada LBA 34 dan 35 yang berisi program selanjutnya
+	;
+	; *==================================/
+	
+	; /==================================*
+	; Data sepanjang 1024 byte yang berawal pada LBA 34 akan dimuat ke memori dan diletakkan mulai
+	; pada alamat 0x700 (tepat setelah program pemantik)
+	; *==================================/
+
+	; /==================================*
+	; Pemuatan data dilakukan dengan menginterupsi 0x13. Sebelum pemanggilan, beberapa
+	; register perlu dikonfigurasi. Register yang perlu diatur adalah
+	; 1. AH    = Perintah. Harus diatur ke 0x2 untuk membaca dari drive.
+	; 2. AL    = Jumlah sektor yang akan dibaca
+	; 3. CH    = Bit rendah nomor silinder
+	; 4. CL    = Bit 0-5 adalah nomor sektor dan bit 6-7 adalah bit tinggi nomor silinder
+	; 5. DH    = Nomor head
+	; 6. DL    = Nomor drive
+	; 7. ES:BX = Alamat memori tujuan untuk meletakkan data
+	;
+	; Referensi: http://www.cs.cmu.edu/~ralf/interrupt-list
+	; *==================================/
+
+	; Matikan interupsi
+	cli
+
+	; Atur ES menjadi 0
+	xor ax, ax
+	mov es, ax
+
+	; Atur BX menjadi 0x700
+	mov bx, 0x700
+
+	; Atur AH menjadi 0x2
+	mov ah, 0x2
+
+	; Atur AL menjadi 2. Jumlah sektor yang akan dibaca adalah 2 sektor
+	mov al, 0x2
+
+	; Atur silinder menjadi 0.
+	mov ch, 0x0
+
+	; Atur nomor sektor menjadi 34
+	mov cl, 34
+
+	; Atur head menjadi 0.
+	mov dh, 0
+
+	; Biarkan nomor drive sesuai bawaan. DL sudah diisi BIOS sebelum program ini dijalankan
+
+	; Cadangkan nilai AL. Nilai AL akan berubah menjadi jumlah sektor yang terbaca setelah
+	; interupsi. Mencadangkan AX sama dengan mencadangkan AH dan AL
+	push ax
+
+	; Nyalakan kembali interupsi
+	sti
+
+	; Interupsi 0x13
+	int 0x13
+
+	; /==================================*
+	; Setelah interupsi, perlu pengecekan beberapa register yang menjadi data status pemuatan
+	; 1. bit CF = 1 jika gagal. 0 jika berhasil
+	; 2. AH     = Status
+	; 3. AL     = Jumlah sektor yang berhasil terbaca
+	;
+	; Referensi: http://www.cs.cmu.edu/~ralf/interrupt-list
+	; *==================================/
+
+	; pulihkan nilai AL sebelumnya ke CL. CX adalah register yang tidak dipakai untuk
+	; status pemuatan. Memulihkan CX sama dengan memulihkan AH sebelumnya ke CH
+	; dan AL sebelumnya ke CL
+	pop cx
+	
+	; lompat ke galat_drive jika bit CF bernilai 1
+	jc galat_drive
+
+	; Bandingkan antara nilai AL (sektor terbaca) dengan CL (jumlah sektor yang diinginkan)
+	cmp al, cl
+
+	; Lompat ke galat_drive jika kedua nilai tidak sama
+	jne galat_drive
+
+	; /==================================*
+	; [ AGENDA 4 ]
+	; Lompat ke alamat program selanjutnya
+	;
+	; *==================================/
+
+	; Lompat ke alamat 0x700
+	jmp 0:0x700
+
+galat_drive:
+	jmp $
+
+	times 510-($-$$) db 0
+
+	dw 0xAA55
